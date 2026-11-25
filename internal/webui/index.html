@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surveys</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --border: #e2e2dc;
+    --accent: #2f5bd3; --accent-text: #ffffff; --bar: #2f5bd3; --bar-bg: #ecece6;
+    --danger: #b42318; --ok: #1f7a3a; --warn-bg: #fff4d6; --warn-text: #7a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --surface: #1e1e1c; --text: #ececea; --muted: #9a9a94; --border: #33332f;
+      --accent: #7c9cff; --accent-text: #0d0d0c; --bar: #7c9cff; --bar-bg: #2a2a27;
+      --danger: #ff7b6e; --ok: #6fd18b; --warn-bg: #3a3215; --warn-text: #f0d27a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 17px; margin: 0 0 8px; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin: 12px 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .badge { font-size: 12px; border: 1px solid var(--border); border-radius: 99px; padding: 1px 8px; color: var(--muted); }
+  .badge.warn { background: var(--warn-bg); color: var(--warn-text); border-color: transparent; }
+  button, .btn { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; text-decoration: none; display: inline-block; }
+  .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+  input[type=email] { width: 100%; max-width: 360px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+  label.opt { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+  .err { color: var(--danger); font-size: 13px; margin-top: 4px; }
+  .ok { color: var(--ok); }
+  .bar { display: grid; grid-template-columns: minmax(90px, 30%) 1fr 92px; gap: 8px; align-items: center; margin: 4px 0; }
+  .track { background: var(--bar-bg); border-radius: 4px; height: 12px; overflow: hidden; }
+  .fill { background: var(--bar); height: 100%; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+  td.cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .req { color: var(--danger); }
+</style>
+</head>
+<body>
+<main id="app"><p class="muted">Loading…</p></main>
+<script>
+const app = document.getElementById('app');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(path, opts) {
+  const res = await fetch('/api/v1' + path, opts);
+  const body = res.status === 204 ? null : await res.json();
+  if (!res.ok) { const e = new Error(body?.error?.message || res.statusText); e.body = body; e.status = res.status; throw e; }
+  return body;
+}
+
+async function listView() {
+  const { surveys } = await api('/surveys');
+  app.innerHTML = `<h1>Surveys</h1><p class="muted">Answer a live survey or browse the results.</p>` +
+    (surveys.length ? surveys.map(s => `
+      <div class="card">
+        <div class="row"><h2>${esc(s.title)}</h2><span class="badge">${esc(s.status)}</span></div>
+        <p class="muted">${esc(s.description || '')} ${s.question_count} questions</p>
+        <div class="row">
+          ${s.status === 'published' ? `<a class="btn" href="#/survey/${s.id}">Answer</a>` : ''}
+          <a class="btn secondary" href="#/results/${s.id}">Results</a>
+        </div>
+      </div>`).join('') : `<div class="card muted">No surveys are published yet.</div>`);
+}
+
+async function surveyView(id) {
+  const s = await api('/surveys/' + encodeURIComponent(id));
+  app.innerHTML = `<p><a href="#/">← All surveys</a></p><h1>${esc(s.title)}</h1><p class="muted">${esc(s.description)}</p>
+    <form id="f">
+      <div class="card"><label for="email"><strong>Your email</strong> <span class="req">*</span></label>
+        <p class="muted">One response per email address.</p>
+        <input type="email" id="email" required autocomplete="email"><div class="err" data-err="email"></div></div>
+      ${s.questions.map(q => `
+        <fieldset class="card" style="border:1px solid var(--border)">
+          <legend><strong>${q.number}. ${esc(q.prompt)}</strong> ${q.required ? '<span class="req">*</span>' : '<span class="badge">optional</span>'}</legend>
+          ${q.type === 'multiple_choice' ? '<p class="muted">Select all that apply.</p>' : ''}
+          ${q.options.map(o => `<label class="opt"><input type="${q.type === 'multiple_choice' ? 'checkbox' : 'radio'}" name="${q.id}" value="${o.id}"> ${esc(o.label)}</label>`).join('')}
+          <div class="err" data-err="answers.${q.id}"></div>
+        </fieldset>`).join('')}
+      <div class="row"><button type="submit">Submit</button><span id="status"></span></div>
+    </form>`;
+  document.getElementById('f').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    app.querySelectorAll('[data-err]').forEach(e => e.textContent = '');
+    const answers = s.questions.map(q => ({
+      question_id: q.id,
+      option_ids: [...app.querySelectorAll(`input[name="${q.id}"]:checked`)].map(i => i.value),
+    }));
+    const status = document.getElementById('status');
+    try {
+      await api(`/surveys/${s.id}/responses`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: document.getElementById('email').value, answers }) });
+      app.innerHTML = `<div class="card"><h2 class="ok">Thanks, your response was recorded.</h2>
+        <p class="muted">Results update within a few seconds.</p><a class="btn" href="#/results/${s.id}">See results</a></div>`;
+    } catch (e) {
+      const fields = e.body?.error?.fields || {};
+      Object.entries(fields).forEach(([k, msg]) => { const el = app.querySelector(`[data-err="${CSS.escape(k)}"]`); if (el) el.textContent = msg; });
+      status.innerHTML = `<span class="err">${esc(e.message)}</span>`;
+    }
+  });
+}
+
+function bar(label, count, pct) {
+  return `<div class="bar"><div>${esc(label)}</div><div class="track"><div class="fill" style="width:${pct}%"></div></div>
+    <div class="num">${count} · ${pct}%</div></div>`;
+}
+
+function relationTable(rel) {
+  if (!rel.computed) return `<p class="muted">Being computed…</p>`;
+  if (!rel.segments.length) return '';
+  const cols = rel.segments[0].breakdown.map(c => c.options.map(o => o.label).join(' · '));
+  const rest = rel.questions.slice(1).map(q => esc(q.prompt)).join(' · ');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>${esc(rel.questions[0].prompt)}</th>${cols.map(c => `<th>${esc(c)}</th>`).join('')}<th>Base</th></tr>
+      <tr><th class="muted" style="font-weight:normal">↓ segment / → ${rest}</th>${cols.map(() => '<th></th>').join('')}<th></th></tr></thead>
+    <tbody>${rel.segments.map(seg => `<tr><th>${esc(seg.option.label)}</th>
+      ${seg.breakdown.map(c => `<td class="cell">${c.count} <span class="muted">(${c.percent_of_segment}%)</span></td>`).join('')}
+      <td class="cell muted">${seg.respondents}</td></tr>`).join('')}</tbody></table></div>
+    <p class="muted">${rel.respondents} respondents answered all related questions${rel.excluded ? `; ${rel.excluded} skipped at least one and are excluded` : ''}. Percentages are within each row.</p>`;
+}
+
+async function resultsView(id) {
+  const r = await api(`/surveys/${encodeURIComponent(id)}/results`);
+  app.innerHTML = `<p><a href="#/">← All surveys</a></p>
+    <div class="row"><h1>${esc(r.title)}</h1><span class="badge">${esc(r.status)}</span>
+      ${r.stale ? '<span class="badge warn">updating…</span>' : ''}</div>
+    <p class="muted">${r.total_responses} responses · ${r.computed_at ? 'computed ' + new Date(r.computed_at).toLocaleString() : 'not computed yet'}
+      · <a href="#" id="refresh">refresh</a></p>
+    <h2>Overall</h2>
+    ${r.questions.map(q => `<div class="card"><strong>${q.number}. ${esc(q.prompt)}</strong>
+      <p class="muted">${q.answered} answered${q.skipped ? ` · ${q.skipped} skipped` : ''}</p>
+      ${q.options.map(o => bar(o.label, o.count, o.percent)).join('')}</div>`).join('')}
+    <h2>Relations</h2>
+    ${r.relations.length ? r.relations.map(rel => `<div class="card"><strong>${esc(rel.name)}</strong>${relationTable(rel)}</div>`).join('')
+      : '<div class="card muted">No relations defined for this survey.</div>'}`;
+  document.getElementById('refresh').onclick = e => { e.preventDefault(); route(); };
+}
+
+async function route() {
+  const [, view, id] = location.hash.split('/');
+  try {
+    if (view === 'survey') await surveyView(id);
+    else if (view === 'results') await resultsView(id);
+    else await listView();
+  } catch (e) {
+    app.innerHTML = `<p><a href="#/">← All surveys</a></p><div class="card err">${esc(e.message)}</div>`;
+  }
+}
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
